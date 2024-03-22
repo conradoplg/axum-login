@@ -16,6 +16,7 @@ hyper = "1.0.1"
 oauth2 = "4.4.2"
 reqwest = { version = "0.11.22", features = ["json"] }
 serde = "1"
+serde_json = "1.0"
 sqlx = { version = "0.7.3", features = ["sqlite", "time", "runtime-tokio"] }
 thiserror = "1.0.50"
 time = "0.3.30"

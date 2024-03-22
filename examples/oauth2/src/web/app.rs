@@ -5,7 +5,7 @@ use axum_login::{
     tower_sessions::{cookie::SameSite, Expiry, MemoryStore, SessionManagerLayer},
     AuthManagerLayerBuilder,
 };
-use oauth2::{basic::BasicClient, AuthUrl, ClientId, ClientSecret, TokenUrl};
+use oauth2::{basic::BasicClient, AuthUrl, ClientId, ClientSecret, RedirectUrl, TokenUrl};
 use sqlx::SqlitePool;
 use time::Duration;
 
@@ -30,9 +30,13 @@ impl App {
             .map(ClientSecret::new)
             .expect("CLIENT_SECRET should be provided");
 
-        let auth_url = AuthUrl::new("https://github.com/login/oauth/authorize".to_string())?;
-        let token_url = TokenUrl::new("https://github.com/login/oauth/access_token".to_string())?;
-        let client = BasicClient::new(client_id, Some(client_secret), auth_url, Some(token_url));
+        let auth_url = AuthUrl::new("https://accounts.google.com/o/oauth2/v2/auth".to_string())?;
+        let token_url = TokenUrl::new("https://www.googleapis.com/oauth2/v3/token".to_string())?;
+        let client = BasicClient::new(client_id, Some(client_secret), auth_url, Some(token_url))
+            .set_redirect_uri(
+                RedirectUrl::new("http://localhost:3000/oauth/callback".to_string())
+                    .expect("Invalid redirect URL"),
+            );
 
         let db = SqlitePool::connect(":memory:").await?;
         sqlx::migrate!().run(&db).await?;

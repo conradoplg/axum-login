@@ -1,11 +1,10 @@
 use async_trait::async_trait;
-use axum::http::header::{AUTHORIZATION, USER_AGENT};
 use axum_login::{AuthUser, AuthnBackend, UserId};
 use oauth2::{
     basic::{BasicClient, BasicRequestTokenError},
     reqwest::{async_http_client, AsyncHttpClientError},
     url::Url,
-    AuthorizationCode, CsrfToken, TokenResponse,
+    AuthorizationCode, CsrfToken, Scope, TokenResponse,
 };
 use serde::{Deserialize, Serialize};
 use sqlx::{FromRow, SqlitePool};
@@ -48,11 +47,6 @@ pub struct Credentials {
     pub new_state: CsrfToken,
 }
 
-#[derive(Debug, Deserialize)]
-struct UserInfo {
-    login: String,
-}
-
 #[derive(Debug, thiserror::Error)]
 pub enum BackendError {
     #[error(transparent)]
@@ -77,7 +71,12 @@ impl Backend {
     }
 
     pub fn authorize_url(&self) -> (Url, CsrfToken) {
-        self.client.authorize_url(CsrfToken::new_random).url()
+        self.client
+            .authorize_url(CsrfToken::new_random)
+            .add_scope(Scope::new(
+                "https://www.googleapis.com/auth/userinfo.email".to_string(),
+            ))
+            .url()
     }
 }
 
@@ -103,21 +102,26 @@ impl AuthnBackend for Backend {
             .request_async(async_http_client)
             .await
             .map_err(Self::Error::OAuth2)?;
+        let access_token = token_res.access_token().secret();
 
         // Use access token to request user info.
-        let user_info = reqwest::Client::new()
-            .get("https://api.github.com/user")
-            .header(USER_AGENT.as_str(), "axum-login") // See: https://docs.github.com/en/rest/overview/resources-in-the-rest-api?apiVersion=2022-11-28#user-agent-required
-            .header(
-                AUTHORIZATION.as_str(),
-                format!("Bearer {}", token_res.access_token().secret()),
-            )
-            .send()
+        let url =
+            "https://www.googleapis.com/oauth2/v2/userinfo?oauth_token=".to_owned() + access_token;
+        let body = reqwest::get(url)
             .await
             .map_err(Self::Error::Reqwest)?
-            .json::<UserInfo>()
+            .text()
             .await
             .map_err(Self::Error::Reqwest)?;
+        // TODO: handle error
+        let mut body: serde_json::Value = serde_json::from_str(body.as_str()).unwrap();
+        // TODO: handle error
+        let email = body["email"].take().as_str().unwrap().to_owned();
+        // TODO: handle error
+        let verified_email = body["verified_email"].take().as_bool().unwrap();
+        if !verified_email {
+            // TODO: return error
+        }
 
         // Persist user in our database so we can use `get_user`.
         let user = sqlx::query_as(
@@ -129,7 +133,7 @@ impl AuthnBackend for Backend {
             returning *
             "#,
         )
-        .bind(user_info.login)
+        .bind(email)
         .bind(token_res.access_token().secret())
         .fetch_one(&self.db)
         .await
